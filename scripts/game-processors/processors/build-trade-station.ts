@@ -250,7 +250,8 @@ export function buildRow(
     systemMaxPrice: roundHalfUp(basePrice * systemMaxRatio),
     bindOnPurchase: raw.bForceBind === true,
     priceStep: Number(override?.stepRatio ?? raw.TradePriceMinDif ?? 0),
-    ...(override ? { percentRungs: override.percentRungs } : {}),
+    ...(override?.percentRungs ? { percentRungs: override.percentRungs } : {}),
+    ...(override?.observedAt ? { observedAt: override.observedAt } : {}),
     bandSource: override ? 'server' : 'client',
     shard: item.shard ?? (shardParent !== null),
     shardOfId: shardParent,
@@ -391,6 +392,23 @@ function isValidRange(range: TradeTableRow['PutAwardRange']): boolean {
   return isNonnegativeNumber(range?.X) && isNonnegativeNumber(range?.Y) && range.X <= range.Y;
 }
 
+/**
+ * A band applies when its target matches and every recorded client value still matches the table,
+ * so a client patch that changes the band stops the stale observation instead of silently keeping it.
+ * A band records either an id prefix or a whole section, never both.
+ */
+function bandMatches(id: string, row: TradeTableRow, band: TradePriceBand): boolean {
+  const targets = band.section
+    ? row.TradeQuality === band.section
+    : band.idPrefix ? id.startsWith(band.idPrefix) : false;
+  if (!targets) return false;
+  const { basePrice, minRatio, maxRatio, stepRatio } = band.clientBand;
+  return (basePrice === undefined || row.TradeBasePrice?.Amount === basePrice)
+    && row.PutAwardRange?.X === minRatio
+    && row.PutAwardRange?.Y === maxRatio
+    && row.TradePriceMinDif === stepRatio;
+}
+
 export function buildTradeStationDataset(input: {
   rows: Record<string, TradeTableRow>;
   sources: Record<string, string>;
@@ -412,10 +430,7 @@ export function buildTradeStationDataset(input: {
   if (code !== 'TradeDiamond') {
     throw new Error(`[build-trade-station] unsupported listing currency: ${code || '(missing)'}`);
   }
-  const bandFor = (id: string, row: TradeTableRow) => bands.find(({ idPrefix, clientBand }) =>
-    id.startsWith(idPrefix) && row.TradeBasePrice?.Amount === clientBand.basePrice
-    && row.PutAwardRange?.X === clientBand.minRatio && row.PutAwardRange?.Y === clientBand.maxRatio
-    && row.TradePriceMinDif === clientBand.stepRatio);
+  const bandFor = (id: string, row: TradeTableRow) => bands.find((band) => bandMatches(id, row, band));
   const dataset: TradeStationDataset = {
     currency: { code, name: CURRENCY_NAME },
     sources: input.sources,
@@ -485,12 +500,17 @@ function readRules(filePath: string, sources: Record<string, string>) {
   }
   for (const band of rules.priceBands ?? []) {
     const client = band.clientBand;
-    if (!band.idPrefix || !isNonnegativeNumber(client?.basePrice)
-      || !isValidRange({ X: client.minRatio, Y: client.maxRatio }) || !isNonnegativeNumber(client.stepRatio)
+    const targets = Boolean(band.idPrefix) !== Boolean(band.section);
+    if (!targets
+      || (client?.basePrice !== undefined && !isNonnegativeNumber(client.basePrice))
+      || !isValidRange({ X: client?.minRatio, Y: client?.maxRatio }) || !isNonnegativeNumber(client?.stepRatio)
       || !isValidRange({ X: band.minRatio, Y: band.maxRatio }) || !isNonnegativeNumber(band.stepRatio)
-      || !Array.isArray(band.percentRungs) || band.percentRungs.length < 2
-      || !band.percentRungs.every(Number.isFinite)) {
-      throw new Error(`[build-trade-station] invalid client signature or price band ${band.idPrefix}: ${filePath}`);
+      || (band.percentRungs !== undefined && (!Array.isArray(band.percentRungs) || band.percentRungs.length < 2
+        || !band.percentRungs.every(Number.isFinite)))
+      || (band.observedAt !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(band.observedAt))) {
+      throw new Error(
+        `[build-trade-station] invalid client signature or price band ${band.idPrefix ?? band.section ?? '(no target)'}: ${filePath}`
+      );
     }
   }
   return { rules, currencyAssets, categoryLabelKeys };

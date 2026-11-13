@@ -52,6 +52,25 @@ const WEAPON_BAND = {
   percentRungs: [-40, -27, -13, 0, 13, 27, 40, 53, 67, 80, 93, 106, 120, 133, 146],
 };
 
+/** The curated Overseas floor for Rare Skin Deco, scoped by section instead of an id prefix. */
+const FASHION_BAND = {
+  section: 'TQ_RATE_FASHION',
+  clientBand: { minRatio: 0.35, maxRatio: 3.5, stepRatio: 0.1 },
+  minRatio: 0.4,
+  maxRatio: 3.5,
+  stepRatio: 0.1,
+  observedAt: '2026-11-12',
+};
+
+const FASHION_ROW: TradeTableRow = {
+  ...LISTING_ROW,
+  PutAwardRange: { X: 0.35, Y: 3.5 },
+  TradePriceMinDif: 0.1,
+  TradeBasePrice: { CurrencyType: 'EHottaCurrencyType::TradeDiamond', Amount: 7980 },
+  TradeQuality: 'TQ_RATE_FASHION',
+  Typeindex: 1,
+};
+
 test('roundHalfUp rounds exact halves up and absorbs float drift', () => {
   assert.equal(roundHalfUp(2.5), 3);
   assert.equal(roundHalfUp(2.49), 2);
@@ -381,6 +400,43 @@ test('buildTradeStationDataset applies an observed band only to matching IDs and
   assert.equal(plain.maxRatio, 2.5);
   assert.equal(updated.bandSource, 'client');
   assert.equal(updated.maxPrice, 12);
+});
+
+test('a section band floors every matching row and stamps its observation date', () => {
+  const dataset = buildTradeStationDataset({
+    rows: {
+      Mount_Racing_001: FASHION_ROW,
+      Mount_019: { ...FASHION_ROW, TradeBasePrice: { CurrencyType: 'EHottaCurrencyType::TradeDiamond', Amount: 1280 } },
+      fragment_FightPet_13: { ...FASHION_ROW, PutAwardRange: { X: 0.3, Y: 4 } },
+      StrengthenStoneMMO_C_Fire: { ...LISTING_ROW, PutAwardRange: { X: 0.35, Y: 3.5 }, TradePriceMinDif: 0.1 },
+    },
+    sources: {},
+    sections: [],
+    describe: (id) => ({ name: id, icon: '', quality: '' }),
+    rules: null,
+    priceBands: [FASHION_BAND],
+  });
+  const [first, second, otherSignature, otherSection] = dataset.rows;
+  assert.equal(first.bandSource, 'server');
+  assert.equal(first.minRatio, 0.4);
+  assert.equal(first.maxRatio, 3.5);
+  // 7,980 × 0.4 = 3,192 UC, and 7,980 × 3.5 = 27,930 UC.
+  assert.equal(first.minPrice, 3192);
+  assert.equal(first.maxPrice, 27930);
+  assert.equal(first.priceStep, 0.1);
+  assert.equal(first.observedAt, '2026-11-12');
+  // The observation covered the band edges only, so no rung labels are claimed.
+  assert.equal('percentRungs' in first, false);
+  // The section selector ignores the reference price: 1,280 × 0.4 = 512 UC.
+  assert.equal(second.bandSource, 'server');
+  assert.equal(second.minPrice, 512);
+  // The client signature still guards the band: the 0.3-4 shard rows keep their client values.
+  assert.equal(otherSignature.bandSource, 'client');
+  assert.equal(otherSignature.minPrice, 2394);
+  // A row outside the section keeps its client band even with the same client signature.
+  assert.equal(otherSection.bandSource, 'client');
+  assert.equal(otherSection.minRatio, 0.35);
+  assert.equal(otherSection.minPrice, 1);
 });
 
 test('buildTradeStationDataset rejects missing listing fields and an unknown currency', () => {

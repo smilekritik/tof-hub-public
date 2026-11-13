@@ -31,16 +31,23 @@ export interface TradeRulesSection {
 
 /** A curated band the Overseas build uses instead of `PutAwardRange`. */
 export interface TradePriceBand {
-  /** Id prefix the band applies to. */
-  idPrefix: string;
-  /** Client values present when this server band was observed. */
-  clientBand: { basePrice: number; minRatio: number; maxRatio: number; stepRatio: number };
+  /** Id prefix the band applies to; exactly one of `idPrefix` and `section` is set. */
+  idPrefix?: string;
+  /** `TradeQuality` the band applies to; exactly one of `idPrefix` and `section` is set. */
+  section?: string;
+  /**
+   * Client values present when this server band was observed. `basePrice` is present only when the
+   * observation covered one reference price, as on a single item family.
+   */
+  clientBand: { basePrice?: number; minRatio: number; maxRatio: number; stepRatio: number };
   minRatio: number;
   maxRatio: number;
   /** The interval between rungs, as the station measures it (13.3333%). */
   stepRatio: number;
-  /** The price buttons the station shows inside the band, as percents of the reference price. */
-  percentRungs: number[];
+  /** The price buttons the station shows inside the band, when the observation covered them. */
+  percentRungs?: number[];
+  /** The date this band was observed; the dataset rules' `observedAt` is the fallback. */
+  observedAt?: string;
   note?: string;
 }
 
@@ -101,6 +108,8 @@ export interface TradeStationRow {
    * Absent on client bands, whose ladder the view walks in whole UC steps.
    */
   percentRungs?: number[];
+  /** The date the curated band that set this row was observed; the rules' `observedAt` is the fallback. */
+  observedAt?: string;
   /** A row whose id starts with the client's `frag_` or `mmo_frag_` prefix. */
   shard: boolean;
   /** Related row identified by stripping the shard prefix, when that id exists in the table. */

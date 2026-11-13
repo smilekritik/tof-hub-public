@@ -72,10 +72,22 @@ and round half up to whole currency units. System-buy bounds apply
 `TradePriceMinDif` is the reference-relative increment. The client export
 does not establish how the station enforces the grid.
 
-The dated Overseas observation in the curated rules applies a -40% to +146%
-band to matching `StrengthenStoneMMO_B*` rows. It includes the station's
-displayed percent rungs and matches the original base amount, bounds and step
-before overriding them. Changed rows use their client values.
+The dated Overseas observations in the curated rules replace the client band
+on matching rows. A band names either an id prefix (a few rows) or a section
+(every row of one `TradeQuality`), and records the client values it was seen
+against; a row whose client bounds, step or base amount no longer match keeps
+its client band.
+
+- `StrengthenStoneMMO_B*` opens -40% to +146% in 13.3333% steps. The band
+  includes the station's displayed percent rungs and pins the 12 UC base
+  amount the observation covered.
+- `TQ_RATE_FASHION` (Rare Skin Deco) lists from 60% of the reference price
+  (-60%) instead of the client's 35% (-65%). The +250% ceiling and the 10%
+  step remain the client's, and only the floor was observed, so no percent
+  rungs are recorded.
+
+Each band carries its own `observedAt`, and the rows it overrides carry that
+date into the item catalog.
 
 Dat3K's export measured 1,081 rows with 669 listable. A separate archived
 export with an unconfirmed version measured 1,006 rows with 760 listable.

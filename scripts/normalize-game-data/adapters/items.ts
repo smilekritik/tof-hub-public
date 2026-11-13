@@ -10,11 +10,12 @@ type CatalogItem = Record<string, unknown> & {id?: string; trade?: ItemTradeData
 export function mergeTradeStationItems(items: Record<string, CatalogItem>, dataset: TradeStationDataset | null) {
   const trades = new Map<string, {item: Pick<TradeStationRow, 'name' | 'icon' | 'quality'>; trade: ItemTradeData}>();
   if (dataset) {
-    for (const {id, name, icon, quality, ...row} of dataset.rows) {
+    for (const {id, name, icon, quality, observedAt, ...row} of dataset.rows) {
+      const bandObservedAt = observedAt ?? (row.bandSource === 'server' ? dataset.rules?.observedAt : undefined);
       trades.set(id, {
         item: {name, icon, quality},
         trade: {...row, currency: dataset.currency,
-          ...(row.bandSource === 'server' && dataset.rules ? {observedAt: dataset.rules.observedAt} : {}),
+          ...(bandObservedAt ? {observedAt: bandObservedAt} : {}),
         },
       });
     }

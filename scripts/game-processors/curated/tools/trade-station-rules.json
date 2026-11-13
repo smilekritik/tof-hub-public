@@ -21,6 +21,15 @@
       "stepRatio": 0.1333333,
       "percentRungs": [-40, -27, -13, 0, 13, 27, 40, 53, 67, 80, 93, 106, 120, 133, 146],
       "note": "Rare weapon-enhancement modules (Enhanced Resonance Module, Advanced Restructure Component). The Overseas station opens -40% to +146% in 13.3333% steps; the labels are the percents the station shows, not a re-rounding of the ratio. The client table says 50% to 250% with a 13.3% increment. Observed 2026-11-07."
+    },
+    {
+      "section": "TQ_RATE_FASHION",
+      "clientBand": { "minRatio": 0.35, "maxRatio": 3.5, "stepRatio": 0.1 },
+      "minRatio": 0.4,
+      "maxRatio": 3.5,
+      "stepRatio": 0.1,
+      "observedAt": "2026-11-12",
+      "note": "Rare Skin Deco. The Overseas station's floor is 60% of the reference price (-60%); the client table says 35% (-65%). The +250% ceiling and the 10% step stay the client's. Only the floor was observed, so no percent rungs are recorded. Observed 2026-11-12."
     }
   ],
   "en": {
