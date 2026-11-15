@@ -154,21 +154,36 @@ export class RankingService {
   private async storedRanks(board:'gear'|'players',query:RankingQuery,ids:string[],perSlot=false):Promise<Record<string,number>> {
     if(!ids.length)return {};
     const gear=board==='gear',table=gear?Prisma.sql`gear_scores`:Prisma.sql`player_scores`,id=gear?Prisma.sql`s.gear_item_id`:Prisma.sql`s.player_id`;
+    const {track}=trackFilter(query.track,query.role);
+    const region=query.region&&query.places!=='global'?query.region:null;
+    const regionFilter=region?Prisma.sql`AND s.region=${region}`:Prisma.empty;
+    const uniqueIds=[...new Set(ids)].sort();
+    const gearVisibility=Prisma.sql`JOIN gear_items g ON g.id=s.gear_item_id JOIN players p ON p.id=g.player_id`;
     const compute=async()=>{
-    const rows=await this.prisma!.$queryRaw<{id:string;rank:bigint}[]>(Prisma.sql`
-      SELECT ranked.id,ranked.rank FROM (
-        SELECT ${id} AS id,row_number() OVER (
-          ${gear&&perSlot?Prisma.sql`PARTITION BY s.slot`:Prisma.empty}
-          ORDER BY s.score DESC,s.max_score DESC,${id} ASC) AS rank
-        FROM ${table} s ${gear?Prisma.sql`JOIN gear_items g ON g.id=s.gear_item_id JOIN players p ON p.id=g.player_id`:Prisma.sql`JOIN players p ON p.id=s.player_id`}
-        WHERE s.track=${trackFilter(query.track,query.role).track} AND NOT p.hidden
-          ${!gear?Prisma.sql`AND cardinality(s.gear_ids)>0`:Prisma.empty}
-          ${gear&&query.slot&&!perSlot?Prisma.sql`AND s.slot=${query.slot}`:Prisma.empty}
-          ${query.region&&query.places!=='global'?Prisma.sql`AND s.region=${query.region}`:Prisma.empty}
-      ) ranked WHERE ranked.id IN (${Prisma.join([...new Set(ids)])})`);
-    return Object.fromEntries(rows.map(row=>[row.id,Number(row.rank)]));
+      // For a build's pieces, count the rows ahead of each target in its slot's score index range.
+      const statement=perSlot?Prisma.sql`
+        SELECT target.gear_item_id AS id, (
+          SELECT count(*)+1 FROM gear_scores s ${gearVisibility}
+          WHERE s.track=target.track AND s.slot=target.slot AND NOT p.hidden ${regionFilter}
+            AND s.score>=target.score
+            AND (s.score>target.score OR (s.score=target.score AND (
+              s.max_score>target.max_score OR (s.max_score=target.max_score AND s.gear_item_id<target.gear_item_id)
+            )))
+        ) AS rank
+        FROM gear_scores target JOIN gear_items g ON g.id=target.gear_item_id JOIN players p ON p.id=g.player_id
+        WHERE target.track=${track} AND target.gear_item_id IN (${Prisma.join(uniqueIds)}) AND NOT p.hidden
+          ${region?Prisma.sql`AND target.region=${region}`:Prisma.empty}`:Prisma.sql`
+        SELECT ranked.id,ranked.rank FROM (
+          SELECT ${id} AS id,row_number() OVER (ORDER BY s.score DESC,s.max_score DESC,${id} ASC) AS rank
+          FROM ${table} s ${gear?gearVisibility:Prisma.sql`JOIN players p ON p.id=s.player_id`}
+          WHERE s.track=${track} AND NOT p.hidden ${regionFilter}
+            ${!gear?Prisma.sql`AND cardinality(s.gear_ids)>0`:Prisma.empty}
+            ${gear&&query.slot?Prisma.sql`AND s.slot=${query.slot}`:Prisma.empty}
+        ) ranked WHERE ranked.id IN (${Prisma.join(uniqueIds)})`;
+      const rows=await this.prisma!.$queryRaw<{id:string;rank:bigint}[]>(statement);
+      return Object.fromEntries(rows.map(row=>[row.id,Number(row.rank)]));
     };
-    return this.cache?this.cache.getRankMap([board,trackFilter(query.track,query.role).track,query.places==='global'?null:query.region??null,perSlot?null:query.slot??null,perSlot,[...new Set(ids)].sort()],compute):compute();
+    return this.cache?this.cache.getRankMap([board,track,region,perSlot?null:query.slot??null,perSlot,uniqueIds],compute):compute();
   }
 
   /** Place the equipped snapshot instead of this owner's best set, using the board's exact tie order. */

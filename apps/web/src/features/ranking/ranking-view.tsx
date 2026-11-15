@@ -521,8 +521,7 @@ function useBoardRank(score:number|null) {
 }
 
 /**
- * Gear-board places of stored pieces, shared by URL: a row starts the request when the pointer reaches it (prefetch) and
- * its details read the same promise when they open, so the places are usually there already (2026-10-08).
+ * Gear-board places of stored pieces, fetched when the details open and cached by URL.
  */
 const pieceRankCache=new Map<string,{expires:number;request:Promise<Record<string,number>|null>}>();
 function fetchPieceRanks(url:string) {
@@ -622,16 +621,13 @@ const PlayerDetails=memo(function PlayerDetails({entry,gear,slots,track,catalog,
 const PlayerRow=memo(function PlayerRow({entry,track,showTrack,genericIdeal,catalog,locale,copy,expanded,toggle}:{entry:PlayerTopEntry;track:ElementTrack;showTrack:boolean;genericIdeal:boolean;catalog:RankingCatalog;locale:BuildLocale;copy:ReturnType<typeof useCopy>;expanded:boolean;toggle:(id:string)=>void}) {
   const role=useContext(RoleContext);
   const ownUid=useContext(OwnPlayerContext);
-  // Start the gear-board places of this build's pieces as soon as the pointer reaches the row.
-  const rankUrls=useContext(RankUrlContext);
-  const prefetch=()=>{const ids=entry.synthetic?[]:pieceIds(entry);if(rankUrls&&ids.length)void fetchPieceRanks(rankUrls.pieces(ids));};
   const scoringTrack=entry.track?parseTrack(entry.track,catalog):track;
   const {gear,total}=playerRowScore(entry,scoringTrack,catalog,role),slots=total.slots,id=playerRowId(entry),panel=`player-top-${id}`;
   const source=total.choice?.Attack;
   const rowTrack=source&&scoringTrack.length===2?[source,...scoringTrack.filter(element=>element!==source)]:scoringTrack;
   const compare=useContext(CompareContext),gain=compare?.player(entry,total.value,total.maximum,rowTrack)??null;
   return <GenericElementContext.Provider key={id} value={genericIdeal&&!!entry.ideal}><Fragment>
-    <div className={`${styles.row} ${styles.playerRow}`} role="row" data-me={!!ownUid&&entry.player.uid===ownUid&&!entry.ideal||undefined} tabIndex={ownUid&&entry.player.uid===ownUid?-1:undefined} data-expanded={expanded||undefined} data-ideal={entry.ideal||undefined} data-compare-reference={gain?.reference||undefined} onPointerEnter={prefetch} onFocus={prefetch}>
+    <div className={`${styles.row} ${styles.playerRow}`} role="row" data-me={!!ownUid&&entry.player.uid===ownUid&&!entry.ideal||undefined} tabIndex={ownUid&&entry.player.uid===ownUid?-1:undefined} data-expanded={expanded||undefined} data-ideal={entry.ideal||undefined} data-compare-reference={gain?.reference||undefined}>
       <span role="cell" className={styles.rank} data-podium={!entry.ideal&&entry.rank<=3?entry.rank:undefined}>{entry.rank}</span>
       <RegionCell player={entry.player}/>
       <span role="cell" className={styles.playerCell}>{entry.synthetic?<><Nickname nickname={entry.player.nickname} copy={copy}/><small>{localeText(locale)('Synthetic build', 'Синтетический комплект')}</small></>:entry.ideal?<><b>{entry.reference==='resistance-only'?copy.resistancePlayer:entry.reference==='attack-percent'?copy.attackPlayer:copy.idealPlayer}</b><small>{entry.reference==='resistance-only'?copy.resistanceReference:entry.reference==='attack-percent'?copy.attackReference:copy.reference}</small></>:<><Nickname nickname={entry.player.nickname} uid={entry.player.uid} copy={copy}/><PlayerCs entry={entry} locale={locale} copy={copy}/></>}</span>
@@ -786,7 +782,7 @@ export function RankingView({catalog,initial,initialSearch='',initialCompare}:{c
   /** One page of the current board (LIMIT rows from `offset`). */
   // The place a projected score would take on the current board (its slot and region filters included), and the
   // gear-board places of a player's pieces on their own slots (same track, role and region).
-  // Memoised: rows read this context (hover prefetch), so a new object would re-render every row on each click.
+  // Memoised so opening a row does not update the other consumers of this context.
   const rankUrls=useMemo(()=>({
     score:(score:number)=>{
       const params=new URLSearchParams({track:trackParam,role:query.role,score:score.toFixed(4)});

@@ -26,6 +26,7 @@ describe.skipIf(!url)('batched piece places on isolated PostgreSQL',()=>{
     const query=parseRankingQuery({track:'Flame-Physical',verified:'1',region:'EU'});
     expect((await service.gearRanks(query,[id(1),id(4),id(6)])).ranks).toEqual({[id(1)]:2,[id(4)]:1,[id(6)]:3});
     expect((await service.gearRanks({...query,places:'global'},[id(1),id(6)])).ranks).toEqual({[id(1)]:3,[id(6)]:4});
+    expect((await service.gearRanks({...query,slot:'helmet'},[id(4),id(4),id(3),id(5),id(7)])).ranks).toEqual({[id(4)]:1});
     expect((await service.gearRanks(query,[])).ranks).toEqual({});
   });
 });
