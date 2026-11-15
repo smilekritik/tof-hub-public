@@ -2,6 +2,8 @@ import {beforeEach,describe,expect,it,vi} from 'vitest';
 import {RankingCacheService} from './ranking-cache.service';
 import type {RankingQuery} from '../ranking.service';
 
+vi.mock('../../players/scoring-catalog',()=>({loadScoringCatalog:()=>({allowedStats:{helmet:[]}})}));
+
 const query:RankingQuery={track:'all',role:'dps',limit:100};
 describe('Ranking cache consistency and bounded snapshots',()=>{
   let revision:string, cache:RankingCacheService;
@@ -9,6 +11,7 @@ describe('Ranking cache consistency and bounded snapshots',()=>{
   let redis:ReturnType<typeof makeRedis>;
   function makeRedis(){return {
     get:vi.fn(async(key:string)=>values.get(key)??null),
+    getBuffer:vi.fn(async(key:string)=>values.has(key)?Buffer.from(values.get(key)!):null),
     set:vi.fn(async(key:string,value:string)=>{values.set(key,value);return 'OK';}),
     exists:vi.fn(async(key:string)=>values.has(key)?1:0),
   };}

@@ -3,6 +3,8 @@ import {Prisma, type PrismaClient} from '@prisma/client';
 import Redis from 'ioredis';
 import {createHash} from 'node:crypto';
 import {setImmediate as yieldToRequests} from 'node:timers/promises';
+import {promisify} from 'node:util';
+import {gzip, gunzip} from 'node:zlib';
 import {PRISMA} from '../../database/database.module';
 import {loadScoringCatalog} from '../../players/scoring-catalog';
 import {RaidCurrentNamesResponseSchema} from '@tof-hub/contracts';
@@ -35,7 +37,19 @@ export interface CacheMetrics {
 
 export const REVISION_ROW_ID = 'ranking:players';
 export const DEFAULT_TTL_SECONDS = 3600;
+const MAX_BOARD_BYTES = 2 * 1024 * 1024;
+const BOARD_COMPRESSION_THRESHOLD = 16 * 1024;
+const deflateBoard = promisify(gzip);
+const inflateBoard = promisify(gunzip);
 type PlayerIdentities = z.infer<typeof RaidCurrentNamesResponseSchema>;
+
+async function readBoard<TEntry>(raw: Buffer): Promise<CachedRanking<TEntry> | null> {
+  const json = raw[0] === 0x1f && raw[1] === 0x8b
+    ? await inflateBoard(raw, {maxOutputLength: MAX_BOARD_BYTES})
+    : raw;
+  const board = JSON.parse(json.toString('utf8')) as CachedRanking<TEntry>;
+  return board.available === true && Array.isArray(board.entries) ? board : null;
+}
 
 @Injectable()
 export class RankingCacheService implements OnModuleInit, OnModuleDestroy {
@@ -210,11 +224,8 @@ export class RankingCacheService implements OnModuleInit, OnModuleDestroy {
     try {
       const revision = expectedRevision ?? await this.getRevision();
       const key = this.buildCacheKey(query, revision, board);
-      const data = await this.redis!.get(key);
-      if (data) {
-        const result = JSON.parse(data) as CachedRanking<TEntry>;
-        return result.available === true && Array.isArray(result.entries) ? result : null;
-      }
+      const data = await this.redis!.getBuffer(key);
+      if (data) return await readBoard<TEntry>(data);
     } catch {
       // Redis read failure -> fallback
     }
@@ -228,8 +239,13 @@ export class RankingCacheService implements OnModuleInit, OnModuleDestroy {
     if (!this.isReady() || !data.available || !this.isWhitelisted(query, board)) return;
     try {
       const key = this.buildCacheKey(query, revision, board);
-      const payload = JSON.stringify(data);
-      if (Buffer.byteLength(payload) <= 2 * 1024 * 1024) await this.redis!.set(key, payload, 'EX', DEFAULT_TTL_SECONDS);
+      const json = JSON.stringify(data);
+      const bytes = Buffer.byteLength(json);
+      if (bytes > MAX_BOARD_BYTES) return;
+      const payload = bytes >= BOARD_COMPRESSION_THRESHOLD
+        ? await deflateBoard(json, {level: 1})
+        : json;
+      await this.redis!.set(key, payload, 'EX', DEFAULT_TTL_SECONDS);
     } catch (err: any) {
       this.logger.warn(`Failed to cache ranking key: ${err.message}`);
     }
@@ -261,10 +277,10 @@ export class RankingCacheService implements OnModuleInit, OnModuleDestroy {
     // 1. Try reading from cache unless a scheduled/manual refresh was requested.
     if (this.redis && this.isConnected && !options.refresh) {
       try {
-        const raw = await this.redis.get(key);
+        const raw = await this.redis.getBuffer(key);
         if (raw) {
-          const cached = JSON.parse(raw) as CachedRanking<TEntry>;
-          if (cached.available === true && Array.isArray(cached.entries)) {
+          const cached = await readBoard<TEntry>(raw);
+          if (cached) {
             this.metrics.hits++;
             return cached;
           }
@@ -288,12 +304,7 @@ export class RankingCacheService implements OnModuleInit, OnModuleDestroy {
     const promise = Promise.resolve().then(async () => {
       try {
         const result = await compute();
-        if (this.redis && this.isConnected && result.available) {
-          const payload = JSON.stringify(result);
-          if (Buffer.byteLength(payload) <= 2 * 1024 * 1024) await this.redis.set(key, payload, 'EX', DEFAULT_TTL_SECONDS).catch((err) => {
-            this.logger.warn(`Background Redis set failed: ${err.message}`);
-          });
-        }
+        await this.set(query, result, revision, board);
         return result;
       } finally {
         this.inFlight.delete(key);

@@ -15,10 +15,11 @@ describe('RankingCacheService', () => {
       $executeRaw: vi.fn().mockResolvedValue(1),
     };
     cache = new RankingCacheService(mockPrisma);
-    const values = new Map<string,string>();
+    const values = new Map<string,string|Buffer>();
     Object.assign(cache, {isConnected:true, redis:{
       get:vi.fn(async(key:string)=>values.get(key)??null),
-      set:vi.fn(async(key:string,value:string)=>{values.set(key,value);return 'OK';}),
+      getBuffer:vi.fn(async(key:string)=>values.has(key)?Buffer.from(values.get(key)!):null),
+      set:vi.fn(async(key:string,value:string|Buffer)=>{values.set(key,value);return 'OK';}),
     }});
   });
 
@@ -92,6 +93,20 @@ describe('RankingCacheService', () => {
   });
 
   describe('stampede protection (in-flight deduplication)', () => {
+    it('compresses large boards and serves them through both cache read paths', async () => {
+      const query: RankingQuery = {track:'all',role:'dps',limit:100};
+      const result={available:true,entries:Array.from({length:100},(_,rank)=>({rank,details:'gear '.repeat(100)}))};
+      const compute=vi.fn().mockResolvedValue(result);
+      expect(await cache.getOrCompute(query,compute)).toEqual(result);
+      const {redis}=cache as unknown as {redis:{getBuffer:(key:string)=>Promise<Buffer>}};
+      const raw=await redis.getBuffer(cache.buildCacheKey(query,'3'));
+      expect([...raw.subarray(0,2)]).toEqual([0x1f,0x8b]);
+      expect(raw.length).toBeLessThan(JSON.stringify(result).length / 4);
+      expect(await cache.get(query,'3')).toEqual(result);
+      expect(await cache.getOrCompute(query,compute)).toEqual(result);
+      expect(compute).toHaveBeenCalledTimes(1);
+    });
+
     it('shares single promise for identical concurrent queries', async () => {
       const query: RankingQuery = {track: 'all', role: 'dps', limit: 50};
       const computeFn = vi.fn().mockImplementation(async () => {
