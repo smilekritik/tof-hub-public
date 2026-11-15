@@ -37,6 +37,7 @@ export interface CacheMetrics {
 
 export const REVISION_ROW_ID = 'ranking:players';
 export const DEFAULT_TTL_SECONDS = 3600;
+const DAILY_BOARD_TTL_SECONDS = 26 * 3600;
 const MAX_BOARD_BYTES = 2 * 1024 * 1024;
 const BOARD_COMPRESSION_THRESHOLD = 16 * 1024;
 const deflateBoard = promisify(gzip);
@@ -245,7 +246,10 @@ export class RankingCacheService implements OnModuleInit, OnModuleDestroy {
       const payload = bytes >= BOARD_COMPRESSION_THRESHOLD
         ? await deflateBoard(json, {level: 1})
         : json;
-      await this.redis!.set(key, payload, 'EX', DEFAULT_TTL_SECONDS);
+      // Keep the scheduled boards through the next daily pass. The revision still gates every read.
+      const daily = (!query.sort || query.sort === 'grv') && !query.verified && query.places !== 'global'
+        && (!query.slot || (query.track === 'all' && query.role === 'dps' && !query.region));
+      await this.redis!.set(key, payload, 'EX', daily ? DAILY_BOARD_TTL_SECONDS : DEFAULT_TTL_SECONDS);
     } catch (err: any) {
       this.logger.warn(`Failed to cache ranking key: ${err.message}`);
     }

@@ -93,6 +93,17 @@ describe('RankingCacheService', () => {
   });
 
   describe('stampede protection (in-flight deduplication)', () => {
+    it('keeps daily first pages until the next pass without extending filtered boards', async () => {
+      const query: RankingQuery={track:'all',role:'dps',limit:100};
+      const response={available:true,entries:[]};
+      const {redis}=cache as unknown as {redis:{set:unknown}};
+      await cache.getOrCompute(query,async()=>response);
+      expect(redis.set).toHaveBeenLastCalledWith(cache.buildCacheKey(query,'3'),expect.anything(),'EX',26*3600);
+      const filtered={...query,verified:true};
+      await cache.set(filtered,response,'3');
+      expect(redis.set).toHaveBeenLastCalledWith(cache.buildCacheKey(filtered,'3'),expect.anything(),'EX',3600);
+    });
+
     it('compresses large boards and serves them through both cache read paths', async () => {
       const query: RankingQuery = {track:'all',role:'dps',limit:100};
       const result={available:true,entries:Array.from({length:100},(_,rank)=>({rank,details:'gear '.repeat(100)}))};

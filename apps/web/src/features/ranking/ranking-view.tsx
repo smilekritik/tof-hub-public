@@ -731,7 +731,7 @@ export function RankingView({catalog,initial,initialSearch='',initialCompare}:{c
   const buildInput=useRef<HTMLInputElement>(null);
   // Under All the weights dialog opens on the first non-Altered element of the catalog (its own picker switches).
   const defaultElement=Object.keys(catalog.elementIcons).find(element=>element!=='Altered')??'';
-  const [result,setResult]=useState<{key:string;board:string;q:string;response:RankingResponse<GearTopEntry|PlayerTopEntry>|null;error:boolean}|null>(null);
+  const [storedResult,setResult]=useState<{key:string;board:string;q:string;response:RankingResponse<GearTopEntry|PlayerTopEntry>|null;error:boolean}|null>(null);
   const [rankingAttempt,setRankingAttempt]=useState(0);
   // Search: the loaded board is narrowed at once; after a pause the server searches the whole board (players outside
   // the loaded top, former nicknames) and returns real ranks.
@@ -760,6 +760,8 @@ export function RankingView({catalog,initial,initialSearch='',initialCompare}:{c
   },[remoteSearch,query.board,catalog,locale]);
   const board=JSON.stringify({...query,track:trackParam,version});
   const key=JSON.stringify({board,q:remoteSearch,slots:slotsParam});
+  const cached=storedResult?.key!==key?cachedResponse(key):undefined;
+  const result=cached?{key,board,q:remoteSearch,response:cached,error:false}:storedResult;
 
   // The address bar mirrors the filters so a top can be shared; no navigation happens.
   useEffect(()=>{
@@ -887,11 +889,13 @@ export function RankingView({catalog,initial,initialSearch='',initialCompare}:{c
   // Counter (2026-10-08): the first number is what the filters match on the whole board (server count, not the rows
   // loaded so far), the second every stored player / piece. While a search is still narrowed only locally, the first
   // number is the matching loaded rows.
-  // The tables take deferred lists: React builds new rows in the background while the input and controls stay live.
-  const deferredGear=useDeferredValue(gearShown),deferredPlayers=useDeferredValue(playersShown);
+  // Defer updates within the same board, such as local search. Switching boards discards the old deferred rows.
+  const currentRows=useMemo(()=>({board,gear:gearShown,players:playersShown}),[board,gearShown,playersShown]);
+  const deferredRows=useDeferredValue(currentRows);
+  const {gear:deferredGear,players:deferredPlayers}=deferredRows.board===board?deferredRows:currentRows;
   const deferredList:{player:{uid?:string|null}}[]=query.board==='gear'?deferredGear:deferredPlayers;
   // A list counts as new when its first rows differ (search, filters); appended pages keep the rows already shown.
-  const listSignature=query.board+'|'+deferredList.slice(0,3).map((entry,index)=>entry.player.uid??index).join(',');
+  const listSignature=board+'|'+deferredList.slice(0,3).map((entry,index)=>entry.player.uid??index).join(',');
   const shownRows=useProgressiveCount(deferredList.length,listSignature);
   useVisibleTitanFrames(animationRoot,`${key}|${listSignature}|${shownRows}|${locale}`,frameAnimations.ready&&frameAnimations.enabled);
   const [revealAttempt,setRevealAttempt]=useState(0);
